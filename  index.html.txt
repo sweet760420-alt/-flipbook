@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>《秀才要出門》動態感翻頁動畫與速度回饋原型</title>
+    <style>
+        @import url('https://googleapis.com');
+
+        :root {
+            --gold-gradient: linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%);
+            --book-width: 380px;
+            --book-height: 500px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #121416;
+            font-family: 'Noto Sans TC', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            color: #e0e0e0;
+            user-select: none;
+        }
+
+        /* --- 頂部互動提示區 --- */
+        .dashboard {
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .instruction {
+            font-family: 'Noto Serif TC', serif;
+            letter-spacing: 2px;
+            color: #c9ad7f;
+            margin-bottom: 8px;
+        }
+
+        .speed-meter {
+            font-size: 0.85rem;
+            font-family: monospace;
+            color: #888;
+            background: rgba(255,255,255,0.05);
+            padding: 4px 12px;
+            border-radius: 20px;
+            display: inline-block;
+            transition: color 0.2s;
+        }
+
+        .speed-meter.active {
+            color: #ffcc00;
+            background: rgba(255, 204, 0, 0.1);
+        }
+
+        /* --- 3D 書本舞台 --- */
+        .stage {
+            width: calc(var(--book-width) * 2);
+            height: var(--book-height);
+            perspective: 1500px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .book {
+            width: var(--book-width);
+            height: var(--book-height);
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 1.5s cubic-bezier(0.25, 1, 0.5, 1);
+            transform: translateX(50%);
+        }
+
+        .book.open {
+            transform: translateX(0%) rotateY(0deg);
+        }
+
+        /* --- 頁面設定 --- */
+        .page {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform-origin: left center;
+            transform-style: preserve-3d;
+            transition: transform 1.2s cubic-bezier(0.25, 1, 0.5, 1);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.5);
+        }
+
+        /* 封面 */
+        .cover {
+            background: #1c1a17;
+            border: 1px solid #2d2922;
+            z-index: 5;
+            backface-visibility: hidden;
+            padding: 40px 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+
+        .book.open .cover {
+            transform: rotateY(-180deg);
+            z-index: 1;
+        }
+
+        .cover::before {
+            content: "";
+            position: absolute;
+            inset: 15px;
+            border: 1px solid #bf953f;
+            opacity: 0.3;
+            pointer-events: none;
+        }
+
+        .cover-title {
+            font-family: 'Noto Serif TC', serif;
+            font-size: 2.2rem;
+            color: #fff;
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+            letter-spacing: 6px;
+            margin: 40px auto 0 auto;
+            font-weight: 700;
+            background: var(--gold-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cover-footer {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #bf953f;
+            letter-spacing: 2px;
+        }
+
+        /* 內頁 */
+        .inner-page {
+            background: #fcfbfa;
+            color: #2b2b2b;
+            z-index: 2;
+            padding: 45px 35px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .inner-content h3 {
+            font-family: 'Noto Serif TC', serif;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e8e2d5;
+            padding-bottom: 10px;
+            color: #8a6d3b;
+        }
+
+        .inner-content p {
+            font-size: 0.95rem;
+            line-height: 1.8;
+            text-align: justify;
+            margin-bottom: 15px;
+        }
+
+        /* --- 翻頁動畫區與風箱波動效果 --- */
+        .flipbook-egg {
+            position: absolute;
+            bottom: 25px;
+            right: 25px;
+            width: 75px;
+            height: 75px;
+            border-radius: 4px;
+            border: 1px dashed #e8e2d5;
+            background: #0a0a0c;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+            transition: transform 0.1s ease-out;
+        }
+
+        .egg-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .egg-label {
+            position: absolute;
+            bottom: 5px;
+            right: 30px;
+            font-size: 0.65rem;
+            color: #a09580;
+            letter-spacing: 1px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <div class="instruction">📖 點擊封面展開後，在網頁任意處【滾動滑鼠滾輪】或【上下滑動】來瘋狂翻頁</div>
+        <div class="speed-meter" id="speedMeter">當前翻頁速度：0.00 Hz</div>
+    </div>
+
+    <div class="stage">
+        <div class="book" id="bookTarget">
+            
+            <!-- 封面 -->
+            <div class="page cover" onclick="toggleBook()">
+                <div class="cover-title">秀才要出門</div>
+                <div class="cover-footer">動態感知 ✕ 實體物理回饋原型</div>
+            </div>
+
+            <!-- 內頁 -->
+            <div class="page inner-page">
+                <div class="inner-content">
+                    <h3>第五章：物理回饋機制</h3>
+                    <p>在這個進化版原型中，我們打破了傳統網頁動畫只能「均速播放」的呆板限制。我們為全息宇宙彩蛋注入了<strong>「動能摩擦力系統」</strong>。</p>
+                    <p>當您停止滾動或滑動時，動畫會因為阻尼慢慢靜止，維持在當前的微觀 DNA 狀態；而當您<strong>加大力道快速滾動滾輪</strong>時，指尖的物理能量將瞬間同步到超級電腦中！</p>
+                    <p>翻頁動畫將在瞬間飆高頻率，讓原本靜止的分子結構在極速摩擦中，爆發、散射，幻化為宏觀的無盡星旋。這就是全息交互的純粹張力。</p>
+                </div>
+
+                <span class="egg-label">使用滾輪/滑動觸發翻頁 ➔</span>
+                <div class="flipbook-egg" id="eggContainer">
+                    <canvas id="eggCanvas" class="egg-canvas"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // 控制書本開闔
+        function toggleBook() {
+            const book = document.getElementById('bookTarget');
+            book.classList.toggle('open');
+        }
+
+        // --- 物理速度控制核心變數 ---
+        let currentSpeed = 0;       // 當前動畫步進速度
+        let targetSpeed = 0;        // 目標速度 (由使用者輸入決定)
+        const baseSpeed = 0.2;      // 基礎背景微動速度
+        const friction = 0.93;      // 摩擦力阻尼 (越接近 1 模擬越滑順，越小則停得越快)
+        
+        const speedMeter = document.getElementById('speedMeter');
+        const eggContainer = document.getElementById('eggContainer');
+
+        // 監聽滾輪事件 (不論向上向下滾動，皆轉換為正向動能)
+        window.addEventListener('wheel', (e) => {
+            targetSpeed += Math.abs(e.deltaY) * 0.08;
+        }, { passive: true });
+
+        // 監聽觸控與滑鼠拖拽滑動事件
+        let lastY = 0;
+        window.addEventListener('mousedown', (e) => { lastY = e.clientY; });
+        window.addEventListener('mousemove', (e) => {
+            if (e.buttons === 1) { // 當滑鼠左鍵按住拖曳時
+                const deltaY = Math.abs(e.clientY - lastY);
+                targetSpeed += deltaY * 0.15;
+                lastY = e.clientY;
+            }
+        });
+        window.addEventListener('touchstart', (e) => { lastY = e.touches[0].clientY; });
+        window.addEventListener('touchmove', (e) => {
+            const deltaY = Math.abs(e.touches[0].clientY - lastY);
+            targetSpeed += deltaY * 0.2;
+            lastY = e.touches[0].clientY;
+        }, { passive: true });
+
+
+        // --- Canvas 渲染引擎 ---
+        const canvas = document.getElementById('eggCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = 150;
+        canvas.height = 150;
+        
+        let virtualFrame = 0; // 改用虛擬幀計數，其遞增速度受 currentSpeed 控制
+        const totalFrames = 300; 
+
+        function drawFlipBook() {
+            // 1. 物理運動學物理計算 (阻尼流體過渡)
+            currentSpeed = currentSpeed * friction + targetSpeed * (1 - friction);
+            targetSpeed *= 0.85; // 目標速度自然衰減
+            
+            // 計算總合播放速度 (基礎微動 + 讀者賦予的動能)
+            const activeSpeed = baseSpeed + currentSpeed;
+            virtualFrame += activeSpeed;
+
+            // 更新儀表板顯示
+            if (currentSpeed > 0.5) {
+                speedMeter.classList.add('active');
+                speedMeter.innerText = `當前翻頁速度：${(activeSpeed * 2.5).toFixed(2)} Hz (極速幻化中)`;
+                // 讓 Canvas 容器隨翻頁速度產生微幅的 3D 震顫震盪感
+                eggContainer.style.transform = `scale(${1 + Math.min(0.12, currentSpeed * 0.005)}) rotate(${Math.sin(virtualFrame*0.1)*2}deg)`;
+            } else {
+                speedMeter.classList.remove('active');
+                speedMeter.innerText = `當前翻頁速度：${(activeSpeed * 2.5).toFixed(2)} Hz (等待指尖撥動)`;
+                eggContainer.style.transform = `scale(1) rotate(0deg)`;
+            }
+
+            // 2. 開始繪製 Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#0a0a0c';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
